@@ -213,6 +213,28 @@ void platform_set_fullscreen(bool fullscreen) {
 	}
 }
 
+#ifdef __sgi
+/* IRIX AL audio backend does not support float format; use S16SYS and convert */
+#define SGI_AUDIO_SAMPLES 1024
+static float sgi_mix_buf[SGI_AUDIO_SAMPLES * 2]; /* stereo */
+
+void platform_audio_callback(void* userdata, uint8_t* stream, int len) {
+	int nsamples = len / sizeof(short);
+	if (audio_callback) {
+		audio_callback(sgi_mix_buf, nsamples);
+		short *out = (short *)stream;
+		for (int i = 0; i < nsamples; i++) {
+			float s = sgi_mix_buf[i];
+			if (s >  1.0f) s =  1.0f;
+			if (s < -1.0f) s = -1.0f;
+			out[i] = (short)(s * 32767.0f);
+		}
+	}
+	else {
+		memset(stream, 0, len);
+	}
+}
+#else
 void platform_audio_callback(void* userdata, uint8_t* stream, int len) {
 	if (audio_callback) {
 		audio_callback((float *)stream, len/sizeof(float));
@@ -221,10 +243,13 @@ void platform_audio_callback(void* userdata, uint8_t* stream, int len) {
 		memset(stream, 0, len);
 	}
 }
+#endif
 
 void platform_set_audio_mix_cb(void (*cb)(float *buffer, uint32_t len)) {
 	audio_callback = cb;
-	SDL_PauseAudioDevice(audio_device, 0);
+	if (audio_device) {
+		SDL_PauseAudioDevice(audio_device, 0);
+	}
 }
 
 
@@ -395,9 +420,18 @@ int main(int argc, char *argv[]) {
 
 	audio_device = SDL_OpenAudioDevice(NULL, 0, &(SDL_AudioSpec){
 		.freq = 44100,
+#ifdef __sgi
+		/* IRIX AL audio does not support float samples; use native 16-bit */
+		.format = AUDIO_S16SYS,
+#else
 		.format = AUDIO_F32SYS,
+#endif
 		.channels = 2,
+#ifdef __sgi
+		.samples = SGI_AUDIO_SAMPLES,
+#else
 		.samples = 1024,
+#endif
 		.callback = platform_audio_callback
 	}, NULL, 0);
 
