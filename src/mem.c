@@ -5,7 +5,12 @@
 #include "utils.h"
 
 
+#ifdef __sgi
+/* MIPS IRIX requires 8-byte aligned memory access to avoid SIGBUS */
+static uint8_t hunk[MEM_HUNK_BYTES] __attribute__((aligned(8)));
+#else
 static uint8_t hunk[MEM_HUNK_BYTES];
+#endif
 static uint32_t bump_len = 0;
 static uint32_t temp_len = 0;
 
@@ -19,10 +24,24 @@ static uint32_t temp_objects_len;
 // whenever we load a new race track or menu in game_set_scene()
 
 void *mem_mark(void) {
+#ifdef __sgi
+	/* Align bump position to 4 bytes before marking.
+	 * 4-byte alignment is sufficient for float/int32_t on MIPS IRIX.
+	 * Using 8 bytes would break primitive struct iteration in object.c/ship.c:
+	 * sizeof(FT3)=28, sizeof(GT3)=36, sizeof(G4)=28, sizeof(GT4)=44 are all
+	 * multiples of 4 but not 8, so 8-byte padding inserts gaps between
+	 * consecutive allocations that confuse pointer arithmetic (prm.ft3 += 1). */
+	bump_len = (bump_len + 3) & ~3u;
+#endif
 	return &hunk[bump_len];
 }
 
 void *mem_bump(uint32_t size) {
+#ifdef __sgi
+	/* Align start of each allocation to 4 bytes for MIPS IRIX.
+	 * Sufficient for float, int32_t, and 32-bit pointers. */
+	bump_len = (bump_len + 3) & ~3u;
+#endif
 	error_if(bump_len + temp_len + size >= MEM_HUNK_BYTES, "Failed to allocate %d bytes in hunk mem", size);
 	uint8_t *p = &hunk[bump_len];
 	bump_len += size;
