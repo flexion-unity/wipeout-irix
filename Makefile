@@ -66,6 +66,14 @@ else ifeq ($(UNAME_S), Linux)
 	L_FLAGS_SDL = -lSDL2
 	L_FLAGS_SOKOL = -lX11 -lXcursor -pthread -lXi -ldl -lasound
 
+# IRIX ------------------------------------------------------------------------
+else ifeq ($(UNAME_S), IRIX64)
+	ifeq ($(RENDERER), GL)
+		L_FLAGS := $(L_FLAGS) -lGLcore -lGLEW /usr/lib32/libX11.so.1 /usr/lib32/libXext.a /usr/lib32/libXt.a /usr/lib32/libXm.so.1 /usr/lib32/libXpm.so.1 -lpthread -lm -Wl,--allow-shlib-undefined -Wl,-rpath-link=/usr/lib32 -Wl,-rpath=/usr/lib32:/usr/sgug/lib32
+		C_FLAGS := $(C_FLAGS) -I/usr/sgug/lib/gcc/mips-sgi-irix6.5/9/include -I/usr/include -I/usr/sgug/include
+	endif
+
+	L_FLAGS_SDL = -lSDL2
 
 # Windows MSYS ------------------------------------------------------------------
 else ifeq ($(shell uname -o), Msys)
@@ -193,4 +201,4 @@ $(BUILD_DIR_WASM)/%.o: %.c
 
 .PHONY: clean
 clean:
-	$(RM) -rf $(BUILD_DIR) $(BUILD_DIR_WASM) $(WASM_RELEASE_DIR)
+	$(RM) -rf $(TARGET_NATIVE) $(BUILD_DIR) $(BUILD_DIR_WASM) $(WASM_RELEASE_DIR)
