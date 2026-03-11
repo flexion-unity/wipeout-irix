@@ -509,7 +509,7 @@ void render_init(vec2i_t screen_size) {
 	uint32_t tw = ATLAS_SIZE * ATLAS_GRID;
 	uint32_t th = ATLAS_SIZE * ATLAS_GRID;
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-	printf("atlas texture %5d\n", atlas_texture);
+	/*printf("atlas texture %5d\n", atlas_texture);*/
 
 
 	// Tris buffer
@@ -1078,8 +1078,8 @@ uint16_t render_texture_create(uint32_t tw, uint32_t th, rgba_t *pixels) {
 	/* offset=(0,0): UV coords from callers are already relative to texture origin */
 	textures[sgi_idx] = (render_texture_t){ {0, 0}, {(int32_t)tw, (int32_t)th} };
 	texture_mipmap_is_dirty = false;
-	printf("sgi texture %d: %dx%d -> POT %dx%d (GL %u)\n",
-		sgi_idx, tw, th, pot_tw, pot_th, gl_tex);
+	/* printf("sgi texture %d: %dx%d -> POT %dx%d (GL %u)\n",
+		sgi_idx, tw, th, pot_tw, pot_th, gl_tex);*/
 	return sgi_idx;
 #endif /* __sgi */
 
@@ -1172,7 +1172,7 @@ uint16_t render_texture_create(uint32_t tw, uint32_t th, rgba_t *pixels) {
 	textures_len++;
 	textures[texture_index] = (render_texture_t){ {x + ATLAS_BORDER, y + ATLAS_BORDER}, {tw, th} };
 
-	printf("inserted atlas texture (%3dx%3d) at (%3d,%3d)\n", tw, th, grid_x, grid_y);
+	/*printf("inserted atlas texture (%3dx%3d) at (%3d,%3d)\n", tw, th, grid_x, grid_y);*/
 	return texture_index;
 }
 
