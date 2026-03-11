@@ -69,7 +69,7 @@ else ifeq ($(UNAME_S), Linux)
 # IRIX ------------------------------------------------------------------------
 else ifeq ($(UNAME_S), IRIX64)
 	ifeq ($(RENDERER), GL)
-		L_FLAGS := $(L_FLAGS) -lGLcore -lGLEW /usr/lib32/libX11.so.1 /usr/lib32/libXext.a /usr/lib32/libXt.a /usr/lib32/libXm.so.1 /usr/lib32/libXpm.so.1 -lpthread -lm -Wl,--allow-shlib-undefined -Wl,-rpath-link=/usr/lib32 -Wl,-rpath=/usr/lib32:/usr/sgug/lib32
+		L_FLAGS := $(L_FLAGS) -lGLcore /usr/lib32/libX11.so.1 /usr/lib32/libXext.a /usr/lib32/libXt.a /usr/lib32/libXm.so.1 /usr/lib32/libXpm.so.1 -lpthread -lm -Wl,--allow-shlib-undefined -Wl,-rpath-link=/usr/lib32 -Wl,-rpath=/usr/lib32:/usr/sgug/lib32
 		C_FLAGS := $(C_FLAGS) -I/usr/sgug/lib/gcc/mips-sgi-irix6.5/9/include -I/usr/include -I/usr/sgug/include
 	endif
 
