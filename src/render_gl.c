@@ -3,15 +3,19 @@
 #if defined(__APPLE__) && defined(__MACH__)
 	#include <OpenGL/gl.h>
 	#include <OpenGL/glext.h>
-	
+
 	#define glGenVertexArrays glGenVertexArraysAPPLE
 	#define glBindVertexArray glBindVertexArrayAPPLE
 	#define glDeleteVertexArrays glDeleteVertexArraysAPPLE
 
+// IRIX (SGI) - OpenGL 1.3 fixed-function pipeline, no GLEW
+#elif defined(__sgi)
+	#include <GL/gl.h>
+
 // Linux
 #elif defined(__unix__)
 	#include <GL/glew.h>
-	
+
 // Windows
 #elif defined(WIN32)
 	#include <windows.h>
@@ -57,7 +61,7 @@
 	#define FAR_PLANE (RENDER_FADEOUT_FAR)
 	#define RENDER_DEPTH_BUFFER_INTERNAL_FORMAT GL_DEPTH_COMPONENT24
 #endif
-	
+
 
 typedef struct {
 	vec2i_t offset;
@@ -65,6 +69,8 @@ typedef struct {
 } render_texture_t;
 
 uint16_t RENDER_NO_TEXTURE;
+
+#ifndef __sgi
 
 #define use_program(SHADER) \
 	glUseProgram((SHADER)->program); \
@@ -89,7 +95,7 @@ static GLuint compile_shader(GLenum type, const char *source) {
 	GLuint shader = glCreateShader(type);
 	glShaderSource(shader, 1, &source, NULL);
 	glCompileShader(shader);
-	
+
 	GLint success;
 	glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
 	if (!success) {
@@ -132,7 +138,7 @@ static const char * const SHADER_GAME_VS = SHADER_SOURCE(
 	uniform vec3 camera_pos;
 	uniform vec2 fade;
 	uniform float time;
-	
+
 	void main(void) {
 		gl_Position = projection * view * model * vec4(pos, 1.0);
 		gl_Position.xy += screen.xy * gl_Position.w;
@@ -182,7 +188,7 @@ typedef struct {
 
 prg_game_t *shader_game_init(void) {
 	prg_game_t *s = mem_bump(sizeof(prg_game_t));
-	
+
 	s->program = create_program(SHADER_GAME_VS, SHADER_GAME_FS);
 
 	s->uniform.view = glGetUniformLocation(s->program, "view");
@@ -223,7 +229,7 @@ static const char * const SHADER_POST_VS = SHADER_SOURCE(
 	uniform mat4 projection;
 	uniform vec2 screen_size;
 	uniform float time;
-	
+
 	void main(void) {
 		gl_Position = projection * vec4(pos, 1.0);
 		v_uv = uv;
@@ -241,7 +247,7 @@ static const char * const SHADER_POST_FS_DEFAULT = SHADER_SOURCE(
 	}
 );
 
-// CRT effect based on https://www.shadertoy.com/view/Ms23DR 
+// CRT effect based on https://www.shadertoy.com/view/Ms23DR
 // by https://github.com/mattiasgustavsson/
 static const char * const SHADER_POST_FS_CRT = SHADER_SOURCE(
 	varying vec2 v_uv;
@@ -252,7 +258,7 @@ static const char * const SHADER_POST_FS_CRT = SHADER_SOURCE(
 
 	vec2 curve(vec2 uv) {
 		uv = (uv - 0.5) * 2.0;
-		uv *= 1.1;	
+		uv *= 1.1;
 		uv.x *= 1.0 + pow((abs(uv.y) / 5.0), 2.0);
 		uv.y *= 1.0 + pow((abs(uv.x) / 4.0), 2.0);
 		uv  = (uv / 2.0) + 0.5;
@@ -281,7 +287,7 @@ static const char * const SHADER_POST_FS_CRT = SHADER_SOURCE(
 		color *= 2.8;
 
 		float scanlines = clamp( 0.35+0.35*sin(3.5*time+uv.y*screen_size.y*1.5), 0.0, 1.0);
-		
+
 		float s = pow(scanlines,1.7);
 		color = color * vec3(0.4+0.7*s);
 
@@ -290,7 +296,7 @@ static const char * const SHADER_POST_FS_CRT = SHADER_SOURCE(
 			color *= 0.0;
 		if (uv.y < 0.0 || uv.y > 1.0)
 			color *= 0.0;
-		
+
 		color*=1.0-0.65*vec3(clamp((mod(gl_FragCoord.x, 2.0)-1.0)*2.0,0.0,1.0));
 		gl_FragColor = vec4(color,1.0);
 	}
@@ -330,23 +336,27 @@ void shader_post_general_init(prg_post_t *s) {
 
 prg_post_t *shader_post_default_init(void) {
 	prg_post_t *s = mem_bump(sizeof(prg_post_t));
-	s->program = create_program(SHADER_POST_VS, SHADER_POST_FS_DEFAULT);	
+	s->program = create_program(SHADER_POST_VS, SHADER_POST_FS_DEFAULT);
 	shader_post_general_init(s);
 	return s;
 }
 
 prg_post_t *shader_post_crt_init(void) {
 	prg_post_t *s = mem_bump(sizeof(prg_post_t));
-	s->program = create_program(SHADER_POST_VS, SHADER_POST_FS_CRT);	
+	s->program = create_program(SHADER_POST_VS, SHADER_POST_FS_CRT);
 	shader_post_general_init(s);
 	return s;
 }
+
+#endif /* !__sgi */
 
 
 
 // -----------------------------------------------------------------------------
 
+#ifndef __sgi
 static GLuint vbo;
+#endif
 
 static tris_t tris_buffer[RENDER_TRIS_BUFFER_CAPACITY];
 static uint32_t tris_len = 0;
@@ -364,12 +374,37 @@ static mat4_t projection_mat_3d = mat4_identity();
 static mat4_t sprite_mat = mat4_identity();
 static mat4_t view_mat = mat4_identity();
 
+#ifdef __sgi
+/* IRIX fixed-function renderer state */
+static mat4_t sgi_model_mat;
+static bool sgi_in_3d = false;
+
+/* Multiply view * model and load into GL MODELVIEW */
+static void sgi_update_modelview(void) {
+	mat4_t mv;
+	mat4_mul(&mv, &view_mat, &sgi_model_mat);
+	glMatrixMode(GL_MODELVIEW);
+	glLoadMatrixf(mv.m);
+}
+
+/* Per-texture GL objects for IRIX (no atlas — hardware GL_MAX_TEXTURE_SIZE ≤ 512) */
+static GLuint sgi_textures[TEXTURES_MAX];
+static vec2i_t sgi_tex_pot[TEXTURES_MAX];              /* actual POT dimensions uploaded */
+static uint16_t tris_textures[RENDER_TRIS_BUFFER_CAPACITY]; /* texture index per buffered tri */
+
+static uint32_t sgi_next_pot(uint32_t v) {
+	uint32_t pot = 1;
+	while (pot < v) pot <<= 1;
+	return pot;
+}
+#endif /* __sgi */
 
 static render_texture_t textures[TEXTURES_MAX];
 static uint32_t textures_len = 0;
 static bool texture_mipmap_is_dirty = false;
 
 static render_resolution_t render_res;
+#ifndef __sgi
 static GLuint backbuffer = 0;
 static GLuint backbuffer_texture = 0;
 static GLuint backbuffer_depth_buffer = 0;
@@ -377,6 +412,7 @@ static GLuint backbuffer_depth_buffer = 0;
 prg_game_t *prg_game;
 prg_post_t *prg_post;
 prg_post_t *prg_post_effects[NUM_RENDER_POST_EFFCTS] = {};
+#endif /* !__sgi */
 
 
 static void render_flush(void);
@@ -386,7 +422,63 @@ static void render_flush(void);
 // 	puts(message);
 // }
 
-void render_init(vec2i_t screen_size) {	
+void render_init(vec2i_t screen_size) {
+#ifdef __sgi
+	/* IRIX OpenGL 1.3 fixed-function pipeline. Per-texture GL objects, no atlas. */
+
+	/* Clear any pre-existing GL errors */
+	while (glGetError() != GL_NO_ERROR) {}
+
+	/* Report hardware texture size limit (informational) */
+	GLint sgi_max_tex = 0;
+	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &sgi_max_tex);
+	printf("GL_MAX_TEXTURE_SIZE = %d\n", sgi_max_tex);
+	printf("IRIX renderer: using per-texture GL objects (no atlas)\n");
+
+	/* GL_MODULATE: result = texture * vertex_color.
+	 * Vertex colors are stored at half-brightness (128 = white = 0.5).
+	 * We compensate by doubling RGB in render_flush before passing to glColor4ub. */
+	glEnable(GL_TEXTURE_2D);
+	glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+
+	/* Texture matrix is set per-texture in render_flush; start with identity. */
+	glMatrixMode(GL_TEXTURE);
+	glLoadIdentity();
+	glMatrixMode(GL_MODELVIEW);
+
+	/* glAlphaTest replaces "if (color.a == 0.0) discard;" in the fragment shader */
+	glEnable(GL_ALPHA_TEST);
+	glAlphaFunc(GL_GREATER, 0.0f);
+
+	/* Linear fog approximates the shader's smoothstep distance fadeout:
+	 *   v_color.a *= smoothstep(FADEOUT_FAR, FADEOUT_NEAR, dist_to_camera)
+	 * GL fog fades geometry to black over the same distance range. */
+	glEnable(GL_FOG);
+	glFogi(GL_FOG_MODE, GL_LINEAR);
+	GLfloat fog_color[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+	glFogfv(GL_FOG_COLOR, fog_color);
+	glFogf(GL_FOG_START, RENDER_FADEOUT_NEAR);
+	glFogf(GL_FOG_END,   RENDER_FADEOUT_FAR);
+
+	glEnable(GL_CULL_FACE);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	/* Initialize model matrix */
+	sgi_model_mat = mat4_identity();
+
+	/* White texture (128,128,128 = half-brightness "white" for 2x scale) */
+	rgba_t white_pixels[4] = {
+		rgba(128,128,128,255), rgba(128,128,128,255),
+		rgba(128,128,128,255), rgba(128,128,128,255)
+	};
+	RENDER_NO_TEXTURE = render_texture_create(2, 2, white_pixels);
+
+	render_res = RENDER_RES_NATIVE;
+	render_set_screen_size(screen_size);
+
+#else /* !__sgi */
+
 	#if defined(__APPLE__) && defined(__MACH__)
 		// OSX
 		// (nothing to do here)
@@ -418,7 +510,7 @@ void render_init(vec2i_t screen_size) {
 	uint32_t th = ATLAS_SIZE * ATLAS_GRID;
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 	printf("atlas texture %5d\n", atlas_texture);
-	
+
 
 	// Tris buffer
 
@@ -458,6 +550,8 @@ void render_init(vec2i_t screen_size) {
 
 	render_res = RENDER_RES_NATIVE;
 	render_set_screen_size(screen_size);
+
+#endif /* __sgi */
 }
 
 void render_cleanup(void) {
@@ -478,14 +572,14 @@ static mat4_t render_setup_2d_projection_mat(vec2i_t size) {
 	return mat4(
 		-2 * lr,  0,  0,  0,
 		0,  -2 * bt,  0,  0,
-		0,        0,  2 * nf,    0, 
+		0,        0,  2 * nf,    0,
 		(left + right) * lr, (top + bottom) * bt, (far + near) * nf, 1
 	);
 }
 
 static mat4_t render_setup_3d_projection_mat(vec2i_t size) {
-	// wipeout has a horizontal fov of 90deg, but we want the fov to be fixed 
-	// for the vertical axis, so that widescreen displays just have a wider 
+	// wipeout has a horizontal fov of 90deg, but we want the fov to be fixed
+	// for the vertical axis, so that widescreen displays just have a wider
 	// view. For the original 4/3 aspect ratio this equates to a vertical fov
 	// of 73.75deg.
 	float aspect = (float)size.x / (float)size.y;
@@ -494,8 +588,8 @@ static mat4_t render_setup_3d_projection_mat(vec2i_t size) {
 	float nf = 1.0 / (NEAR_PLANE - FAR_PLANE);
 	return mat4(
 		f / aspect, 0, 0, 0,
-		0, f, 0, 0, 
-		0, 0, (FAR_PLANE + NEAR_PLANE) * nf, -1, 
+		0, f, 0, 0,
+		0, 0, (FAR_PLANE + NEAR_PLANE) * nf, -1,
 		0, 0, 2 * FAR_PLANE * NEAR_PLANE * nf, 0
 	);
 }
@@ -511,6 +605,17 @@ void render_set_screen_size(vec2i_t size) {
 void render_set_resolution(render_resolution_t res) {
 	render_res = res;
 
+#ifdef __sgi
+	/* IRIX: no FBO, always render at native resolution */
+	backbuffer_size = screen_size;
+
+	projection_mat_2d = render_setup_2d_projection_mat(backbuffer_size);
+	projection_mat_3d = render_setup_3d_projection_mat(backbuffer_size);
+
+	glViewport(0, 0, backbuffer_size.x, backbuffer_size.y);
+
+#else /* !__sgi */
+
 	if (res == RENDER_RES_NATIVE) {
 		backbuffer_size = screen_size;
 	}
@@ -520,7 +625,7 @@ void render_set_resolution(render_resolution_t res) {
 			backbuffer_size = vec2i(240.0 * aspect, 240);
 		}
 		else if (res == RENDER_RES_480P) {
-			backbuffer_size = vec2i(480.0 * aspect, 480);	
+			backbuffer_size = vec2i(480.0 * aspect, 480);
 		}
 		else {
 			die("Invalid resolution: %d", res);
@@ -528,23 +633,23 @@ void render_set_resolution(render_resolution_t res) {
 	}
 
 	if (!backbuffer) {
-		glGenTextures(1, &backbuffer_texture);	
+		glGenTextures(1, &backbuffer_texture);
 		glGenFramebuffers(1, &backbuffer);
 		glGenRenderbuffers(1, &backbuffer_depth_buffer);
 	}
-	
+
 	glBindTexture(GL_TEXTURE_2D, backbuffer_texture);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, backbuffer_size.x, backbuffer_size.y, 0, GL_RGB, GL_UNSIGNED_BYTE, 0);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	
+
 	glBindFramebuffer(GL_FRAMEBUFFER, backbuffer);
-	glBindRenderbuffer(GL_RENDERBUFFER, backbuffer_depth_buffer);	
+	glBindRenderbuffer(GL_RENDERBUFFER, backbuffer_depth_buffer);
 	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, backbuffer_depth_buffer);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, backbuffer_texture, 0);
-	
+
 	glBindRenderbuffer(GL_RENDERBUFFER, backbuffer_depth_buffer);
 	glRenderbufferStorage(GL_RENDERBUFFER, RENDER_DEPTH_BUFFER_INTERNAL_FORMAT, backbuffer_size.x, backbuffer_size.y);
 
@@ -561,11 +666,15 @@ void render_set_resolution(render_resolution_t res) {
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	}
 	glViewport(0, 0, backbuffer_size.x, backbuffer_size.y);
+
+#endif /* __sgi */
 }
 
 void render_set_post_effect(render_post_effect_t post) {
+#ifndef __sgi
 	error_if(post < 0 || post > NUM_RENDER_POST_EFFCTS, "Invalid post effect %d", post);
 	prg_post = prg_post_effects[post];
+#endif
 }
 
 vec2i_t render_size(void) {
@@ -573,6 +682,16 @@ vec2i_t render_size(void) {
 }
 
 void render_frame_prepare(void) {
+#ifdef __sgi
+	/* IRIX: no single atlas; individual textures are bound per-draw in render_flush */
+	glViewport(0, 0, backbuffer_size.x, backbuffer_size.y);
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+	glDisable(GL_POLYGON_OFFSET_FILL);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+#else /* !__sgi */
 	use_program(prg_game);
 	glBindFramebuffer(GL_FRAMEBUFFER, backbuffer);
 	glViewport(0, 0, backbuffer_size.x, backbuffer_size.y);
@@ -584,12 +703,14 @@ void render_frame_prepare(void) {
 	glDisable(GL_POLYGON_OFFSET_FILL);
 	glClearColor(0, 0, 0, 1);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	glEnable(GL_DEPTH_TEST); 
+	glEnable(GL_DEPTH_TEST);
+#endif /* __sgi */
 }
 
 void render_frame_end(void) {
 	render_flush();
 
+#ifndef __sgi
 	use_program(prg_post);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -619,6 +740,7 @@ void render_frame_end(void) {
 	};
 
 	render_flush();
+#endif /* !__sgi */
 }
 
 void render_flush(void) {
@@ -626,6 +748,37 @@ void render_flush(void) {
 		return;
 	}
 
+#ifdef __sgi
+	/* IRIX: per-texture GL objects; group consecutive tris by texture and bind each */
+	uint32_t i = 0;
+	while (i < tris_len) {
+		uint16_t cur_tex = tris_textures[i];
+		vec2i_t pot = sgi_tex_pot[cur_tex];
+		glBindTexture(GL_TEXTURE_2D, sgi_textures[cur_tex]);
+		glMatrixMode(GL_TEXTURE);
+		glLoadIdentity();
+		glScalef(1.0f / (float)pot.x, 1.0f / (float)pot.y, 1.0f);
+		glMatrixMode(GL_MODELVIEW);
+		glBegin(GL_TRIANGLES);
+		while (i < tris_len && tris_textures[i] == cur_tex) {
+			for (int j = 0; j < 3; j++) {
+				vertex_t *v = &tris_buffer[i].vertices[j];
+				/* Double RGB: compensates for half-brightness storage (GL_MODULATE path).
+				 * Equivalent to shader: color.rgb = tex.rgb * v_color.rgb * 2.0 */
+				uint8_t r = v->color.r > 127 ? 255 : (uint8_t)(v->color.r * 2);
+				uint8_t g = v->color.g > 127 ? 255 : (uint8_t)(v->color.g * 2);
+				uint8_t b = v->color.b > 127 ? 255 : (uint8_t)(v->color.b * 2);
+				glColor4ub(r, g, b, v->color.a);
+				glTexCoord2f(v->uv.x, v->uv.y);
+				glVertex3f(v->pos.x, v->pos.y, v->pos.z);
+			}
+			i++;
+		}
+		glEnd();
+	}
+	tris_len = 0;
+
+#else /* !__sgi */
 	if (texture_mipmap_is_dirty) {
 		glGenerateMipmap(GL_TEXTURE_2D);
 		texture_mipmap_is_dirty = false;
@@ -635,6 +788,7 @@ void render_flush(void) {
 	glBufferData(GL_ARRAY_BUFFER, sizeof(tris_t) * tris_len, tris_buffer, GL_DYNAMIC_DRAW);
 	glDrawArrays(GL_TRIANGLES, 0, tris_len * 3);
 	tris_len = 0;
+#endif /* __sgi */
 }
 
 
@@ -649,6 +803,18 @@ void render_set_view(vec3_t pos, vec3_t angles) {
 	mat4_translate(&view_mat, vec3_inv(pos));
 	mat4_set_yaw_pitch_roll(&sprite_mat, vec3(-angles.x, angles.y - M_PI, 0));
 
+#ifdef __sgi
+	sgi_model_mat = mat4_identity();
+	sgi_in_3d = true;
+
+	glMatrixMode(GL_PROJECTION);
+	glLoadMatrixf(projection_mat_3d.m);
+
+	sgi_update_modelview();
+
+	glEnable(GL_FOG);
+
+#else /* !__sgi */
 	render_set_model_mat(&mat4_identity());
 
 	render_flush();
@@ -656,6 +822,7 @@ void render_set_view(vec3_t pos, vec3_t angles) {
 	glUniformMatrix4fv(prg_game->uniform.projection, 1, false, projection_mat_3d.m);
 	glUniform3f(prg_game->uniform.camera_pos, pos.x, pos.y, pos.z);
 	glUniform2f(prg_game->uniform.fade, RENDER_FADEOUT_NEAR, RENDER_FADEOUT_FAR);
+#endif /* __sgi */
 }
 
 void render_set_view_2d(void) {
@@ -663,15 +830,33 @@ void render_set_view_2d(void) {
 	render_set_depth_test(false);
 	render_set_depth_write(false);
 
+#ifdef __sgi
+	sgi_model_mat = mat4_identity();
+	sgi_in_3d = false;
+
+	glDisable(GL_FOG);
+
+	glMatrixMode(GL_PROJECTION);
+	glLoadMatrixf(projection_mat_2d.m);
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+
+#else /* !__sgi */
 	render_set_model_mat(&mat4_identity());
 	glUniform3f(prg_game->uniform.camera_pos, 0, 0, 0);
 	glUniformMatrix4fv(prg_game->uniform.view, 1, false, mat4_identity().m);
 	glUniformMatrix4fv(prg_game->uniform.projection, 1, false, projection_mat_2d.m);
+#endif /* __sgi */
 }
 
 void render_set_model_mat(mat4_t *m) {
 	render_flush();
+#ifdef __sgi
+	sgi_model_mat = *m;
+	sgi_update_modelview();
+#else
 	glUniformMatrix4fv(prg_game->uniform.model, 1, false, m->m);
+#endif
 }
 
 void render_set_depth_write(bool enabled) {
@@ -685,7 +870,7 @@ void render_set_depth_test(bool enabled) {
 		glEnable(GL_DEPTH_TEST);
 	}
 	else {
-		glDisable(GL_DEPTH_TEST); 
+		glDisable(GL_DEPTH_TEST);
 	}
 }
 
@@ -693,7 +878,7 @@ void render_set_depth_offset(float offset) {
 	render_flush();
 	if (offset == 0) {
 		glDisable(GL_POLYGON_OFFSET_FILL);
-		return;	
+		return;
 	}
 
 	glEnable(GL_POLYGON_OFFSET_FILL);
@@ -701,8 +886,10 @@ void render_set_depth_offset(float offset) {
 }
 
 void render_set_screen_position(vec2_t pos) {
+#ifndef __sgi
 	render_flush();
 	glUniform2f(prg_game->uniform.screen, pos.x, -pos.y);
+#endif
 }
 
 void render_set_blend_mode(render_blend_mode_t new_mode) {
@@ -739,7 +926,7 @@ vec3_t render_transform(vec3_t pos) {
 
 void render_push_tris(tris_t tris, uint16_t texture_index) {
 	error_if(texture_index >= textures_len, "Invalid texture %d", texture_index);
-	
+
 	if (tris_len >= RENDER_TRIS_BUFFER_CAPACITY) {
 		render_flush();
 	}
@@ -750,6 +937,9 @@ void render_push_tris(tris_t tris, uint16_t texture_index) {
 		tris.vertices[i].uv.x += t->offset.x;
 		tris.vertices[i].uv.y += t->offset.y;
 	}
+#ifdef __sgi
+	tris_textures[tris_len] = texture_index;
+#endif
 	tris_buffer[tris_len++] = tris;
 }
 
@@ -853,6 +1043,46 @@ void render_push_2d_tile(vec2i_t pos, vec2i_t uv_offset, vec2i_t uv_size, vec2i_
 uint16_t render_texture_create(uint32_t tw, uint32_t th, rgba_t *pixels) {
 	error_if(textures_len >= TEXTURES_MAX, "TEXTURES_MAX reached");
 
+#ifdef __sgi
+	/* IRIX: create an individual GL texture object with POT-padded dimensions.
+	 * The atlas approach requires 2048×2048 which exceeds GL_MAX_TEXTURE_SIZE (512). */
+	uint32_t pot_tw = sgi_next_pot(tw > 0 ? tw : 1);
+	uint32_t pot_th = sgi_next_pot(th > 0 ? th : 1);
+
+	rgba_t *upload_pixels = pixels;
+	rgba_t *padded = NULL;
+	if (tw && th && (pot_tw != tw || pot_th != th)) {
+		padded = mem_temp_alloc(sizeof(rgba_t) * pot_tw * pot_th);
+		memset(padded, 0, sizeof(rgba_t) * pot_tw * pot_th);
+		for (uint32_t row = 0; row < th; row++) {
+			memcpy(padded + row * pot_tw, pixels + row * tw, tw * sizeof(rgba_t));
+		}
+		upload_pixels = padded;
+	}
+
+	GLuint gl_tex;
+	glGenTextures(1, &gl_tex);
+	glBindTexture(GL_TEXTURE_2D, gl_tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, pot_tw, pot_th, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+		(tw && th) ? upload_pixels : NULL);
+
+	if (padded) { mem_temp_free(padded); }
+
+	uint16_t sgi_idx = textures_len++;
+	sgi_textures[sgi_idx] = gl_tex;
+	sgi_tex_pot[sgi_idx] = vec2i(pot_tw, pot_th);
+	/* offset=(0,0): UV coords from callers are already relative to texture origin */
+	textures[sgi_idx] = (render_texture_t){ {0, 0}, {(int32_t)tw, (int32_t)th} };
+	texture_mipmap_is_dirty = false;
+	printf("sgi texture %d: %dx%d -> POT %dx%d (GL %u)\n",
+		sgi_idx, tw, th, pot_tw, pot_th, gl_tex);
+	return sgi_idx;
+#endif /* __sgi */
+
 	uint32_t bw = tw + ATLAS_BORDER * 2;
 	uint32_t bh = th + ATLAS_BORDER * 2;
 
@@ -905,7 +1135,7 @@ uint16_t render_texture_create(uint32_t tw, uint32_t th, rgba_t *pixels) {
 		for (int32_t y = 0; y < ATLAS_BORDER; y++) {
 			memcpy(pb + bw * (bh - ATLAS_BORDER + y) + ATLAS_BORDER, pixels + tw * (th-1), tw * sizeof(rgba_t));
 		}
-		
+
 		// Left border
 		for (int32_t y = 0; y < bh; y++) {
 			for (int32_t x = 0; x < ATLAS_BORDER; x++) {
@@ -932,8 +1162,12 @@ uint16_t render_texture_create(uint32_t tw, uint32_t th, rgba_t *pixels) {
 	glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, bw, bh, GL_RGBA, GL_UNSIGNED_BYTE, pb);
 	mem_temp_free(pb);
 
-
+#ifdef __sgi
+	/* No mipmaps on IRIX: glGenerateMipmap is GL 3.0+ */
+	texture_mipmap_is_dirty = false;
+#else
 	texture_mipmap_is_dirty = RENDER_USE_MIPMAPS;
+#endif
 	uint16_t texture_index = textures_len;
 	textures_len++;
 	textures[texture_index] = (render_texture_t){ {x + ATLAS_BORDER, y + ATLAS_BORDER}, {tw, th} };
@@ -951,8 +1185,14 @@ void render_texture_replace_pixels(int16_t texture_index, rgba_t *pixels) {
 	error_if(texture_index >= textures_len, "Invalid texture %d", texture_index);
 
 	render_texture_t *t = &textures[texture_index];
+#ifdef __sgi
+	/* IRIX: update pixels within the per-texture GL object at origin (0,0) */
+	glBindTexture(GL_TEXTURE_2D, sgi_textures[texture_index]);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, t->size.x, t->size.y, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+#else
 	glBindTexture(GL_TEXTURE_2D, atlas_texture);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, t->offset.x, t->offset.y, t->size.x, t->size.y, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+#endif
 }
 
 uint16_t render_textures_len(void) {
@@ -962,6 +1202,25 @@ uint16_t render_textures_len(void) {
 void render_textures_reset(uint16_t len) {
 	error_if(len > textures_len, "Invalid texture reset len %d >= %d", len, textures_len);
 	render_flush();
+
+#ifdef __sgi
+	/* IRIX: delete per-texture GL objects for slots being freed */
+	for (uint16_t i = len; i < textures_len; i++) {
+		if (sgi_textures[i]) {
+			glDeleteTextures(1, &sgi_textures[i]);
+			sgi_textures[i] = 0;
+		}
+	}
+	textures_len = len;
+	if (len == 0) {
+		rgba_t white_pixels[4] = {
+			rgba(128,128,128,255), rgba(128,128,128,255),
+			rgba(128,128,128,255), rgba(128,128,128,255)
+		};
+		RENDER_NO_TEXTURE = render_texture_create(2, 2, white_pixels);
+	}
+	return;
+#endif /* __sgi */
 
 	textures_len = len;
 	clear(atlas_map);
@@ -989,10 +1248,16 @@ void render_textures_reset(uint16_t len) {
 }
 
 void render_textures_dump(const char *path) {
+#ifdef __sgi
+	/* On IRIX, textures are per-GL-object; no single atlas to dump */
+	(void)path;
+	printf("render_textures_dump: not supported on IRIX (per-texture GL objects)\n");
+#else
 	int width = ATLAS_SIZE * ATLAS_GRID;
 	int height = ATLAS_SIZE * ATLAS_GRID;
 	rgba_t *pixels = malloc(sizeof(rgba_t) * width * height);
 	glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 	stbi_write_png(path, width, height, 4, pixels, 0);
 	free(pixels);
+#endif
 }
