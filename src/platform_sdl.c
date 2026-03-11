@@ -420,16 +420,13 @@ int main(int argc, char *argv[]) {
 
 	audio_device = SDL_OpenAudioDevice(NULL, 0, &(SDL_AudioSpec){
 		.freq = 44100,
+		.channels = 2,
 #ifdef __sgi
 		/* IRIX AL audio does not support float samples; use native 16-bit */
 		.format = AUDIO_S16SYS,
-#else
-		.format = AUDIO_F32SYS,
-#endif
-		.channels = 2,
-#ifdef __sgi
 		.samples = SGI_AUDIO_SAMPLES,
 #else
+		.format = AUDIO_F32SYS,
 		.samples = 1024,
 #endif
 		.callback = platform_audio_callback
