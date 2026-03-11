@@ -10,16 +10,27 @@
 #include "image.h"
 #include "game.h"
 
-void free_dummmy(void *p) {}
-void *realloc_dummmy(void *p, size_t sz) {
+#ifndef __sgi
+static void free_dummmy(void *p) {}
+static void *realloc_dummmy(void *p, size_t sz) {
 	die("pl_mpeg needed to realloc. Not implemented. Maybe increase PLM_BUFFER_DEFAULT_SIZE");
 	return NULL;
 }
+#endif
 
 #define PL_MPEG_IMPLEMENTATION
+#ifdef __sgi
+/* IRIX/MIPS: mem_bump is 4-byte aligned; pl_mpeg internals contain double/uint64_t
+ * fields that require 8-byte alignment — SIGBUS otherwise. Use system malloc. */
+#include <stdlib.h>
+#define PLM_MALLOC malloc
+#define PLM_FREE free
+#define PLM_REALLOC realloc
+#else
 #define PLM_MALLOC mem_bump
 #define PLM_FREE free_dummmy
 #define PLM_REALLOC realloc_dummmy
+#endif
 #include <pl_mpeg.h>
 
 #define INTRO_AUDIO_BUFFER_LEN (64 * 1024)
