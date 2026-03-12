@@ -358,6 +358,7 @@ prg_post_t *shader_post_crt_init(void) {
 static GLuint vbo;
 #endif
 
+static bool no_texture_mode = false;
 static tris_t tris_buffer[RENDER_TRIS_BUFFER_CAPACITY];
 static uint32_t tris_len = 0;
 
@@ -421,6 +422,10 @@ static void render_flush(void);
 // static void gl_message_callback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar *message, const void *userParam) {
 // 	puts(message);
 // }
+
+void render_set_no_texture_mode(bool enabled) {
+	no_texture_mode = enabled;
+}
 
 void render_init(vec2i_t screen_size) {
 #ifdef __sgi
@@ -814,6 +819,9 @@ void render_set_view(vec3_t pos, vec3_t angles) {
 
 	glEnable(GL_FOG);
 
+	if (no_texture_mode)
+		glDisable(GL_TEXTURE_2D);
+
 #else /* !__sgi */
 	render_set_model_mat(&mat4_identity());
 
@@ -835,6 +843,9 @@ void render_set_view_2d(void) {
 	sgi_in_3d = false;
 
 	glDisable(GL_FOG);
+
+	if (no_texture_mode)
+		glEnable(GL_TEXTURE_2D);
 
 	glMatrixMode(GL_PROJECTION);
 	glLoadMatrixf(projection_mat_2d.m);

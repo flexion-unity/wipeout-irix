@@ -5,6 +5,7 @@
 #include "system.h"
 #include "utils.h"
 #include "mem.h"
+#include "render.h"
 
 static uint64_t perf_freq = 0;
 static bool wants_to_exit = false;
@@ -370,6 +371,18 @@ uint32_t platform_store_userdata(const char *name, void *bytes, int32_t len) {
 #endif
 
 int main(int argc, char *argv[]) {
+
+	for (int i = 1; i < argc; i++) {
+		if (strcmp(argv[i], "--no-textures") == 0) {
+			render_set_no_texture_mode(true);
+			printf("Texture rendering disabled\n");
+		}  else if (strcmp(argv[i], "--help") == 0) {
+			printf("Available options:\n");
+			printf(" --no-textures		Disable texture rendering\n");
+			exit(EXIT_SUCCESS);
+		}
+	}
+
 	SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER);
 
 	// Figure out the absolute asset and userdata paths. These may either be
